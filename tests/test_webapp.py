@@ -14,6 +14,12 @@ from tempfile import TemporaryDirectory
 
 from trust_prediction.webapp import build_server
 
+try:
+    import fpdf  # noqa: F401
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
+
 
 class TestWebapp(unittest.TestCase):
     def setUp(self):
@@ -198,6 +204,31 @@ class TestWebapp(unittest.TestCase):
         self.assertEqual(status, 200)
         data = json.loads(body)
         self.assertEqual(data["application"]["name"], "A")
+
+    @unittest.skipIf(HAS_FPDF, "проверяем путь \"библиотека не установлена\" — fpdf2 здесь есть, пропускаем")
+    def test_pdf_report_returns_friendly_error_without_fpdf(self):
+        self._post("/api/application", {"name": "A", "owner": "O"})
+        status, data = self._post("/api/versions", {"label": "1.0", "target": 0.9})
+        v1 = data["versions"][0]
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get(f"/api/versions/{v1['id']}/report.pdf")
+        self.assertEqual(ctx.exception.code, 501)
+        payload = json.loads(ctx.exception.read())
+        self.assertIn("pip install", payload["error"])
+
+    @unittest.skipUnless(HAS_FPDF, "fpdf2 не установлена в этом окружении — см. requirements.txt")
+    def test_pdf_report_downloads_valid_pdf(self):
+        self._post("/api/application", {"name": "A", "owner": "O"})
+        status, data = self._post("/api/versions", {"label": "1.0", "target": 0.9})
+        v1 = data["versions"][0]
+        status, body = self._get(f"/api/versions/{v1['id']}/report.pdf")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.startswith(b"%PDF-"))
+
+    def test_pdf_report_404_for_unknown_version(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self._get("/api/versions/no-such-version/report.pdf")
+        self.assertEqual(ctx.exception.code, 404)
 
 
 if __name__ == "__main__":

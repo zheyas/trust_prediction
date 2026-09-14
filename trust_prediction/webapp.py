@@ -28,6 +28,7 @@ from . import audit as audit_mod
 from . import demo as demo_mod
 from . import raci
 from .models import ApprovalDecision, ChangeCategory, ControlOutcome, PredictionPolicy
+from .pdf_report import PdfDependencyError, build_report_pdf
 from .report import build_report
 from .storage import Repository
 from .trust import compute_actual_trust, compute_expected_trust
@@ -373,6 +374,19 @@ def h_get_report(ctx, m, body):
     return 200, {"markdown": text}
 
 
+def h_get_report_pdf(ctx, m, body):
+    version_id = m.group("id")
+    if version_id not in ctx["repo"].versions:
+        raise ApiError(404, "Версия не найдена")
+    try:
+        pdf_bytes = build_report_pdf(ctx["repo"], version_id)
+    except PdfDependencyError as e:
+        raise ApiError(501, str(e))
+    ver = ctx["repo"].versions[version_id]
+    filename = f"report_{ver.label}.pdf".replace(" ", "_")
+    return 200, {"__raw__": True, "content_type": "application/pdf", "filename": filename, "body": pdf_bytes}
+
+
 def h_get_export(ctx, m, body):
     data = json.dumps(
         json.loads(ctx["project_path_active"].read_text(encoding="utf-8"))
@@ -423,6 +437,7 @@ ROUTES: list[tuple[str, re.Pattern, Callable]] = [
     ("POST", re.compile(r"^/api/versions/(?P<id>[\w-]+)/audit$"), h_post_audit),
     ("POST", re.compile(r"^/api/versions/(?P<id>[\w-]+)/assess$"), h_post_assess),
     ("GET", re.compile(r"^/api/versions/(?P<id>[\w-]+)/report$"), h_get_report),
+    ("GET", re.compile(r"^/api/versions/(?P<id>[\w-]+)/report\.pdf$"), h_get_report_pdf),
     ("GET", re.compile(r"^/api/export$"), h_get_export),
     ("POST", re.compile(r"^/api/demo$"), h_post_demo),
     ("POST", re.compile(r"^/api/switch$"), h_post_switch),
