@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прогнозирование доверия приложения — ГОСТ Р ИСО/МЭК 27034-7-2020</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-badge">ГОСТ</div>
+      <div class="brand-text">
+        <div class="brand-title">Прогноз доверия</div>
+        <div class="brand-sub">Р ИСО/МЭК 27034-7-2020</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item" data-nav="overview">
+        <span class="nav-ico">&#9673;</span> Обзор и МОБП
+      </button>
+      <button class="nav-item" data-nav="raci">
+        <span class="nav-ico">&#9638;</span> Матрица RACI
+      </button>
+      <button class="nav-item" data-nav="log">
+        <span class="nav-ico">&#128337;</span> Журнал аудита
+      </button>
+    </nav>
+
+    <div class="nav-section-label">Версии приложения</div>
+    <div class="nav-versions" id="nav-versions"></div>
+
+    <div class="sidebar-actions">
+      <button class="btn btn-ghost btn-block" id="btn-new-version">+ Новая версия</button>
+      <button class="btn btn-ghost btn-block" id="btn-demo">&#9889; Демо-сценарий</button>
+    </div>
+
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-block btn-small" id="btn-export">&#8659; Экспорт project.json</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div id="demo-banner" class="demo-banner" hidden>
+        Показан демонстрационный сценарий (демо-данные).
+        <button class="link-btn" id="btn-back-own">Вернуться к своему проекту</button>
+      </div>
+      <div class="topbar-title" id="topbar-title">Обзор</div>
+      <div class="topbar-app" id="topbar-app"></div>
+    </header>
+
+    <main class="content" id="content">
+      <!-- рендерится из app.js -->
+    </main>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <div class="modal-title" id="modal-title"></div>
+      <button class="modal-close" id="modal-close" aria-label="Закрыть">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
