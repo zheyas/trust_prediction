@@ -249,6 +249,13 @@ input:focus, select:focus, textarea:focus {
 .btn-ghost:hover { background: var(--sidebar-active); color: #fff; }
 .btn-small { padding: 6px 10px; font-size: 12px; }
 .btn-block { width: 100%; justify-content: center; }
+.btn-hero {
+  width: 100%; justify-content: center; margin-top: 16px;
+  padding: 14px 20px; font-size: 15.5px; font-weight: 700; border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--accent), #14b8a6); color: #fff;
+  box-shadow: 0 4px 14px rgba(13, 148, 136, 0.28);
+}
+.btn-hero:hover { background: linear-gradient(135deg, var(--accent-dark), var(--accent)); box-shadow: 0 6px 18px rgba(13, 148, 136, 0.36); }
 .link-btn { background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; padding: 0; }
 
 /* ----------------------------------------------------------------- gauge */

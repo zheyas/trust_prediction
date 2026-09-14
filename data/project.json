@@ -1,0 +1,50 @@
+{
+  "application": {
+    "name": "Система моделирования \"МодельОк\"",
+    "owner": "ООО \"ААА\"",
+    "id": "app-7b619255"
+  },
+  "controls": {
+    "ctrl-49f3e968": {
+      "name": "SAST",
+      "category": "code",
+      "weight": 1.0,
+      "critical": false,
+      "id": "ctrl-49f3e968",
+      "description": ""
+    }
+  },
+  "versions": {
+    "ver-91bc335f": {
+      "application_id": "app-7b619255",
+      "label": "1.2",
+      "parent_version_id": null,
+      "id": "ver-91bc335f",
+      "created_at": "2026-09-14T06:44:19+00:00",
+      "changes": [],
+      "target_trust_threshold": 0.9
+    }
+  },
+  "executions": {},
+  "pasrs": {},
+  "verifications": {},
+  "audit_log": [
+    {
+      "step": "init",
+      "actor": "ООО \"ААА\"",
+      "details": "Зарегистрировано приложение «Система моделирования \"МодельОк\"», владелец: ООО \"ААА\"",
+      "id": "log-92fb04b0",
+      "timestamp": "2026-09-14T04:17:16+00:00"
+    },
+    {
+      "step": "step1",
+      "actor": "Группа \"Село\"",
+      "details": "Политика прогнозирования: conditional; пороги существенности: substantial>=0.5, borderline>=0.35",
+      "id": "log-0cb6d613",
+      "timestamp": "2026-09-14T04:17:45+00:00"
+    }
+  ],
+  "policy": "conditional",
+  "substantial_threshold": 0.5,
+  "borderline_threshold": 0.35
+}

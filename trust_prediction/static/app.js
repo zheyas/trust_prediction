@@ -44,6 +44,31 @@ const STATUS_LABELS = {
 };
 const DECISION_LABELS = { pending: "Ожидание", approved: "Утверждено", rejected: "Отклонено" };
 
+const CONTROL_CATEGORY_OPTIONS = [
+  { value: "code", label: "Код (SAST/SCA)" },
+  { value: "architecture", label: "Архитектура / моделирование угроз" },
+  { value: "test", label: "Тестирование (DAST/пентест)" },
+  { value: "configuration", label: "Конфигурация" },
+  { value: "access", label: "Контроль доступа" },
+  { value: "crypto", label: "Криптография" },
+  { value: "logging", label: "Логирование и мониторинг" },
+  { value: "general", label: "Общая" },
+];
+const COMMON_CONTROL_NAMES = [
+  "Статический анализ кода (SAST)",
+  "Анализ состава зависимостей (SCA)",
+  "Динамическое тестирование (DAST)",
+  "Архитектурный анализ угроз (Threat modeling)",
+  "Ревью контроля доступа",
+  "Проверка конфигурации окружения",
+  "Пентест",
+  "Ревью кода",
+  "Проверка криптографии",
+  "Анализ секретов в репозитории",
+  "IaC-сканирование инфраструктуры",
+  "Проверка логирования и мониторинга",
+];
+
 /* ------------------------------------------------------------------ API */
 
 async function api(path, method = "GET", body) {
@@ -76,6 +101,38 @@ function toast(message, isError) {
 function fail(err) {
   console.error(err);
   toast(err.message || String(err), true);
+}
+
+/** Скачивает файл через fetch (а не голой ссылкой), чтобы показать
+ * дружелюбную ошибку тостом, если сервер ответил не файлом (например,
+ * PDF ещё недоступен без установленной библиотеки fpdf2). */
+async function downloadFile(url, fallbackFilename, button) {
+  const prevText = button ? button.textContent : null;
+  if (button) { button.disabled = true; button.textContent = "Формирование…"; }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      let msg = `Ошибка (${res.status})`;
+      try { const j = await res.json(); if (j.error) msg = j.error; } catch (e) { /* не json */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const filename = match ? match[1] : fallbackFilename;
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+  } catch (err) {
+    fail(err);
+  } finally {
+    if (button) { button.disabled = false; button.textContent = prevText; }
+  }
 }
 
 /* --------------------------------------------------------------- modal */
@@ -122,6 +179,90 @@ function controlOptions(selectedIds) {
 }
 function versionById(id) { return (STATE.data.versions || []).find((v) => v.id === id); }
 function controlById(id) { return (STATE.data.controls || []).find((c) => c.id === id); }
+
+/* --------------------------------------------------- выпадающие списки с
+ * возможностью ввести своё значение ("Другое…") — переиспользуемый паттерн
+ * для категорий и полей-акторов (роль/имя исполнителя). */
+
+function selectWithCustomHTML(name, groups, { preset, placeholder } = {}) {
+  const flat = groups.flatMap((g) => g.options);
+  const presetIsKnown = preset != null && flat.some((o) => o.value === preset);
+  const renderOpts = (opts) => opts.map((o) =>
+    `<option value="${esc(o.value)}" ${presetIsKnown && o.value === preset ? "selected" : ""}>${esc(o.label)}</option>`
+  ).join("");
+  const groupsHtml = groups.map((g) =>
+    g.label
+      ? `<optgroup label="${esc(g.label)}">${renderOpts(g.options)}</optgroup>`
+      : renderOpts(g.options)
+  ).join("");
+  const showCustom = preset != null && !presetIsKnown;
+  return `
+    <select name="${name}" data-has-custom>
+      <option value="">— выбрать —</option>
+      ${groupsHtml}
+      <option value="__custom__" ${showCustom ? "selected" : ""}>Другое (ввести вручную)…</option>
+    </select>
+    <input type="text" data-custom-for="${name}" placeholder="${esc(placeholder || "Введите значение")}"
+      value="${showCustom ? esc(preset) : ""}" style="${showCustom ? "margin-top:6px;" : "display:none;margin-top:6px;"}">
+  `;
+}
+
+function wireCustomSelects(root) {
+  root.querySelectorAll("select[data-has-custom]").forEach((sel) => {
+    // Scope the lookup to the select's own <form> (falling back to root)
+    // rather than searching the whole root: a root can contain several
+    // sibling forms that reuse the same field name (e.g. "actor" in the
+    // verify/audit/assess forms), and an unscoped querySelector would
+    // always grab the first match in document order, wiring the wrong
+    // custom-input to this select.
+    const scope = sel.closest("form") || root;
+    const custom = scope.querySelector(`[data-custom-for="${sel.name}"]`);
+    if (!custom) return;
+    const sync = () => {
+      const isCustom = sel.value === "__custom__";
+      custom.style.display = isCustom ? "" : "none";
+      if (isCustom) custom.focus();
+    };
+    sel.addEventListener("change", sync);
+  });
+}
+
+function resolveField(form, name) {
+  const sel = form.querySelector(`select[name="${name}"][data-has-custom]`);
+  if (sel) {
+    if (sel.value === "__custom__") {
+      const custom = form.querySelector(`[data-custom-for="${name}"]`);
+      return custom ? custom.value.trim() : "";
+    }
+    return sel.value;
+  }
+  const plain = form.querySelector(`[name="${name}"]`);
+  return plain ? plain.value : "";
+}
+
+/** Роли (из матрицы RACI) + ранее использованные в проекте имена/роли —
+ * для полей-акторов (инициатор, представитель НСО, владелец, исполнитель…). */
+function actorGroups() {
+  const roleLabels = (STATE.raci?.actors || []).map((a) => a.label);
+  const known = knownActors().filter((a) => !roleLabels.includes(a));
+  const groups = [];
+  if (roleLabels.length) groups.push({ label: "Роли (по умолчанию)", options: roleLabels.map((l) => ({ value: l, label: l })) });
+  if (known.length) groups.push({ label: "Ранее использованные", options: known.map((l) => ({ value: l, label: l })) });
+  return groups;
+}
+function knownActors() {
+  const set = new Set();
+  if (STATE.data.application?.owner) set.add(STATE.data.application.owner);
+  (STATE.data.audit_log || []).forEach((e) => { if (e.actor) set.add(e.actor); });
+  (STATE.data.versions || []).forEach((v) => {
+    (v.executions || []).forEach((e) => { if (e.executed_by) set.add(e.executed_by); });
+    (v.pasrs || []).forEach((p) => { Object.values(p.actors || {}).forEach((a) => { if (a) set.add(a); }); });
+  });
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+}
+function actorFieldHTML(name, preset, placeholder) {
+  return selectWithCustomHTML(name, actorGroups(), { preset, placeholder: placeholder || "Введите имя или роль" });
+}
 
 /* ------------------------------------------------------------------ load */
 
@@ -285,7 +426,7 @@ function renderOverview() {
             ${Object.entries(POLICY_LABELS).map(([k, v]) => `<option value="${k}" ${STATE.data.policy === k ? "selected" : ""}>${v}</option>`).join("")}
           </select>
         </div>
-        <div class="field"><label>Представитель НСО (актор)</label><input type="text" name="actor" placeholder="Например, «Группа НСО»" required></div>
+        <div class="field"><label>Представитель НСО (актор)</label>${actorFieldHTML("actor", "Группа НСО")}</div>
       </div>
       <div class="form-row">
         <div class="field"><label>Порог «существенное», &ge;</label>
@@ -299,12 +440,13 @@ function renderOverview() {
     </form>
   </div>`);
   wireRangeOutputs(policyCard);
+  wireCustomSelects(policyCard);
   policyCard.querySelector("#form-policy").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
       await api("/api/policy", "POST", {
-        policy: fd.get("policy"), actor: fd.get("actor"),
+        policy: fd.get("policy"), actor: resolveField(e.target, "actor"),
         substantial: parseFloat(fd.get("substantial")), borderline: parseFloat(fd.get("borderline")),
       });
       toast("Политика прогнозирования обновлена");
@@ -348,26 +490,37 @@ function renderControlsTable() {
 
 function openAddControlModal() {
   const body = el(`<form id="form-control">
-    <div class="field"><label>Название меры</label><input type="text" name="name" required placeholder="Например, «Статический анализ кода (SAST)»"></div>
+    <div class="field"><label>Название меры</label>
+      <input type="text" name="name" list="control-name-suggestions" required placeholder="Выберите из списка или введите своё">
+      <datalist id="control-name-suggestions">${COMMON_CONTROL_NAMES.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+    </div>
     <div class="form-row">
-      <div class="field"><label>Категория</label><input type="text" name="category" placeholder="code / architecture / test / configuration / access …"></div>
+      <div class="field"><label>Категория</label>
+        ${selectWithCustomHTML("category", [{ options: CONTROL_CATEGORY_OPTIONS }], { preset: "general", placeholder: "Своя категория" })}
+      </div>
       <div class="field"><label>Вес</label><input type="number" name="weight" value="1.0" min="0" step="0.1"></div>
     </div>
-    <div class="field checkbox-row"><input type="checkbox" name="critical" id="cc-critical"><label for="cc-critical" style="margin:0;">Критическая мера (обязательна верификация при переносе через ПОБП)</label></div>
+    <div class="field"><label>Тип меры</label>
+      <select name="critical">
+        <option value="false" selected>Обычная мера</option>
+        <option value="true">Критическая (обязательна верификация при переносе через ПОБП)</option>
+      </select>
+    </div>
     <div class="field"><label>Описание (необязательно)</label><textarea name="description"></textarea></div>
     <div class="form-actions">
       <button type="button" class="btn btn-secondary" id="cc-cancel">Отмена</button>
       <button type="submit" class="btn btn-primary">Добавить меру</button>
     </div>
   </form>`);
+  wireCustomSelects(body);
   body.querySelector("#cc-cancel").addEventListener("click", closeModal);
   body.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
       await api("/api/controls", "POST", {
-        name: fd.get("name"), category: fd.get("category"),
-        weight: parseFloat(fd.get("weight") || "1"), critical: fd.get("critical") === "on",
+        name: fd.get("name"), category: resolveField(e.target, "category"),
+        weight: parseFloat(fd.get("weight") || "1"), critical: fd.get("critical") === "true",
         description: fd.get("description"),
       });
       toast("Мера добавлена");
@@ -462,6 +615,7 @@ function renderVersionHeaderCard(v) {
         <div class="kv"><b>Суммарный вес мер</b> ${v.trust.counted_weight} / ${v.trust.total_weight}</div>
       </div>
     </div>
+    <button class="btn btn-hero" id="btn-report-hero">&#128196; Получить отчёт</button>
     <details style="margin-top:14px;">
       <summary class="muted" style="cursor:pointer;font-size:12.5px;">Разбивка по мерам</summary>
       <div class="table-wrap" style="margin-top:10px;">
@@ -474,6 +628,7 @@ function renderVersionHeaderCard(v) {
   </div>`);
   const link = card.querySelector("[data-goto-version]");
   if (link) link.addEventListener("click", (e) => { e.preventDefault(); goto("version", link.dataset.gotoVersion); });
+  card.querySelector("#btn-report-hero").addEventListener("click", () => openReportModal(v));
   return card;
 }
 
@@ -629,19 +784,20 @@ function openExecuteModal(v, ctrl) {
       <select name="outcome"><option value="pass">PASS — соответствует</option><option value="fail">FAIL — не соответствует</option></select>
     </div>
     <div class="field"><label>Свидетельство / артефакт проверки</label><input type="text" name="evidence" required placeholder="Например, «Отчёт SAST-сканирования от 12.03.2026»"></div>
-    <div class="field"><label>Кем выполнено</label><input type="text" name="by" required placeholder="Проектная команда"></div>
+    <div class="field"><label>Кем выполнено</label>${actorFieldHTML("by", "Проектная команда")}</div>
     <div class="form-actions">
       <button type="button" class="btn btn-secondary" id="ex-cancel">Отмена</button>
       <button type="submit" class="btn btn-primary">Зафиксировать выполнение</button>
     </div>
   </form>`);
+  wireCustomSelects(body);
   body.querySelector("#ex-cancel").addEventListener("click", closeModal);
   body.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
       const res = await api(`/api/versions/${v.id}/execute`, "POST", {
-        control_id: ctrl.id, outcome: fd.get("outcome"), evidence: fd.get("evidence"), by: fd.get("by"),
+        control_id: ctrl.id, outcome: fd.get("outcome"), evidence: fd.get("evidence"), by: resolveField(e.target, "by"),
       });
       toast(res.message);
       closeModal();
@@ -655,10 +811,10 @@ function openPasrModal(v, ctrl) {
   const body = el(`<form id="form-pasr">
     <p class="card-sub" style="margin-top:0;">Мера «${esc(ctrl.name)}», версия «${esc(v.label)}» — перенос доверия через ПОБП (раздел 9). Если изменения, затрагивающие эту меру, признаны существенными — подготовка будет отклонена (раздел 7).</p>
     <div class="form-row">
-      <div class="field"><label>Инициатор</label><input type="text" name="initiator" required value="Проектная команда"></div>
-      <div class="field"><label>Представитель НСО</label><input type="text" name="onf" required value="Группа НСО"></div>
+      <div class="field"><label>Инициатор</label>${actorFieldHTML("initiator", "Проектная команда")}</div>
+      <div class="field"><label>Представитель НСО</label>${actorFieldHTML("onf", "Группа НСО")}</div>
     </div>
-    <div class="field"><label>Владелец приложения</label><input type="text" name="owner" required value="${esc(STATE.data.application.owner)}"></div>
+    <div class="field"><label>Владелец приложения</label>${actorFieldHTML("owner", STATE.data.application.owner)}</div>
     <div class="field"><label>2/3. Обстоятельства прогнозирования</label><textarea name="circumstances" required placeholder="При каких условиях и почему предлагается перенос доверия"></textarea></div>
     <div class="field"><label>4. Обоснование</label><textarea name="rationale" required placeholder="Почему перенос доверия оправдан для данной меры"></textarea></div>
     <div class="field"><label>6. Критерии достаточности обоснования</label><textarea name="criteria" required placeholder="По каким критериям обоснование считается достаточным"></textarea></div>
@@ -667,6 +823,7 @@ function openPasrModal(v, ctrl) {
       <button type="submit" class="btn btn-primary">Подготовить ПОБП</button>
     </div>
   </form>`);
+  wireCustomSelects(body);
   body.querySelector("#pa-cancel").addEventListener("click", closeModal);
   body.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -674,7 +831,7 @@ function openPasrModal(v, ctrl) {
     try {
       const res = await api("/api/pasr", "POST", {
         version_id: v.id, control_id: ctrl.id,
-        initiator: fd.get("initiator"), onf: fd.get("onf"), owner: fd.get("owner"),
+        initiator: resolveField(e.target, "initiator"), onf: resolveField(e.target, "onf"), owner: resolveField(e.target, "owner"),
         circumstances: fd.get("circumstances"), rationale: fd.get("rationale"), criteria: fd.get("criteria"),
       });
       toast(res.message);
@@ -729,13 +886,14 @@ function renderPasrItem(v, p) {
   ["onf", "owner"].forEach((party) => {
     const form = card.querySelector(`form[data-party="${party}"]`);
     if (!form) return;
+    wireCustomSelects(form);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       try {
         const res = await api(`/api/pasr/${p.id}/decide`, "POST", {
           party, decision: e.submitter.dataset.decision,
-          actor: fd.get("actor"), justification: fd.get("justification"),
+          actor: resolveField(e.target, "actor"), justification: fd.get("justification"),
         });
         toast(res.message);
         await refresh();
@@ -756,7 +914,7 @@ function renderDecisionBox(p, party, label) {
     ${done
       ? `<div class="faint">${esc(justification || "без обоснования")}</div>`
       : `<form data-party="${party}">
-          <div class="field" style="margin-bottom:6px;"><input type="text" name="actor" placeholder="Кто принимает решение" required></div>
+          <div class="field" style="margin-bottom:6px;">${actorFieldHTML("actor", label, "Кто принимает решение")}</div>
           <div class="field" style="margin-bottom:6px;"><input type="text" name="justification" placeholder="Обоснование решения"></div>
           <div class="decision-row">
             <button type="submit" class="btn btn-primary btn-small" data-decision="approved">Утвердить</button>
@@ -774,7 +932,7 @@ function renderProcessActionsCard(v) {
       <div>
         <h3>8. Верификация выборкой</h3>
         <form id="form-verify">
-          <div class="field"><label>Актор</label><input type="text" name="actor" value="Аудитор" required></div>
+          <div class="field"><label>Актор</label>${actorFieldHTML("actor", "Аудитор")}</div>
           <div class="field"><label>Доля выборки (кроме критических — берутся всегда)</label>
             <div class="range-row"><input type="range" name="sampling_rate" min="0" max="1" step="0.05" value="0.34"><span class="range-val" data-out="sampling_rate">0.34</span></div>
           </div>
@@ -787,7 +945,7 @@ function renderProcessActionsCard(v) {
         <h3>9. Аудит ПОБП</h3>
         <p class="faint">Проверка качества оформления ПОБП и завершённости утверждения, сверка с результатами верификации.</p>
         <form id="form-audit">
-          <div class="field"><label>Актор</label><input type="text" name="actor" value="Аудитор" required></div>
+          <div class="field"><label>Актор</label>${actorFieldHTML("actor", "Аудитор")}</div>
           <button type="submit" class="btn btn-secondary btn-block">Провести аудит</button>
         </form>
         <div id="audit-result"></div>
@@ -796,15 +954,16 @@ function renderProcessActionsCard(v) {
         <h3>10. Оценка и отчёт</h3>
         <p class="faint">Фиксация ожидаемого уровня доверия версии и формирование итогового отчёта (раздел 13).</p>
         <form id="form-assess">
-          <div class="field"><label>Актор</label><input type="text" name="actor" value="Аудитор" required></div>
+          <div class="field"><label>Актор</label>${actorFieldHTML("actor", "Аудитор")}</div>
           <button type="submit" class="btn btn-secondary btn-block">Зафиксировать оценку</button>
         </form>
-        <button class="btn btn-primary btn-block" style="margin-top:8px;" id="btn-report">&#128196; Сформировать отчёт</button>
+        <p class="faint" style="margin-top:8px;">Отчёт формируется кнопкой «Получить отчёт» вверху страницы.</p>
       </div>
     </div>
   </div>`);
 
   wireRangeOutputs(card);
+  wireCustomSelects(card);
 
   const verifyChecklist = card.querySelector("#form-verify .checklist");
   if (verifyChecklist) {
@@ -820,7 +979,7 @@ function renderProcessActionsCard(v) {
     const mismatch = Array.from(e.target.querySelectorAll('input[name="mismatch"]:checked')).map((i) => i.value);
     try {
       const res = await api(`/api/versions/${v.id}/verify`, "POST", {
-        actor: fd.get("actor"), sampling_rate: parseFloat(fd.get("sampling_rate")),
+        actor: resolveField(e.target, "actor"), sampling_rate: parseFloat(fd.get("sampling_rate")),
         seed: fd.get("seed"), mismatch,
       });
       toast(res.message);
@@ -832,7 +991,7 @@ function renderProcessActionsCard(v) {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      const res = await api(`/api/versions/${v.id}/audit`, "POST", { actor: fd.get("actor") });
+      const res = await api(`/api/versions/${v.id}/audit`, "POST", { actor: resolveField(e.target, "actor") });
       toast(res.message);
       const s = res.summary;
       card.querySelector("#audit-result").innerHTML = `
@@ -847,13 +1006,11 @@ function renderProcessActionsCard(v) {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      const res = await api(`/api/versions/${v.id}/assess`, "POST", { actor: fd.get("actor") });
+      const res = await api(`/api/versions/${v.id}/assess`, "POST", { actor: resolveField(e.target, "actor") });
       toast(res.message);
       await refresh();
     } catch (err) { fail(err); }
   });
-
-  card.querySelector("#btn-report").addEventListener("click", () => openReportModal(v));
 
   return card;
 }
@@ -863,12 +1020,17 @@ function renderProcessActionsCard(v) {
 async function openReportModal(v) {
   const body = el(`<div>
     <div class="pill-row" style="margin-bottom:14px;">
-      <a class="btn btn-secondary btn-small" href="/api/versions/${v.id}/report?download=1" target="_blank" rel="noopener">&#8659; Скачать .md</a>
+      <button class="btn btn-primary btn-small" id="rep-pdf">&#8659; Скачать PDF</button>
+      <button class="btn btn-secondary btn-small" id="rep-md">&#8659; Скачать .md</button>
       <button class="btn btn-secondary btn-small" id="rep-close">Закрыть</button>
     </div>
     <div class="report-view" id="rep-body"><div class="empty-state">Формирование отчёта…</div></div>
   </div>`);
   body.querySelector("#rep-close").addEventListener("click", closeModal);
+  const pdfName = `report_${v.label}.pdf`.replace(/\s+/g, "_");
+  const mdName = `report_${v.label}.md`.replace(/\s+/g, "_");
+  body.querySelector("#rep-pdf").addEventListener("click", (e) => downloadFile(`/api/versions/${v.id}/report.pdf`, pdfName, e.currentTarget));
+  body.querySelector("#rep-md").addEventListener("click", (e) => downloadFile(`/api/versions/${v.id}/report?download=1`, mdName, e.currentTarget));
   openModal(`Отчёт об ожидаемом уровне доверия — «${v.label}»`, body);
   document.querySelector(".modal").style.maxWidth = "820px";
   try {

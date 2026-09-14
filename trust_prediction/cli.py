@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import raci
 from .models import ApprovalDecision, ChangeCategory, ControlOutcome, PredictionPolicy
+from .pdf_report import PdfDependencyError, build_report_pdf
 from .report import build_report, save_report
 from .storage import Repository
 from .workflow import TrustPredictionWorkflow, WorkflowError
@@ -138,8 +139,17 @@ def cmd_assess(args):
 
 def cmd_report(args):
     repo = _repo(args)
-    out = args.out or "report.md"
-    save_report(repo, args.version, out)
+    if args.format == "pdf":
+        out = args.out or "report.pdf"
+        try:
+            pdf_bytes = build_report_pdf(repo, args.version)
+        except PdfDependencyError as e:
+            print(f"ОТКАЗ: {e}", file=sys.stderr)
+            sys.exit(1)
+        Path(out).write_bytes(pdf_bytes)
+    else:
+        out = args.out or "report.md"
+        save_report(repo, args.version, out)
     print(f"Отчёт сохранён: {out}")
 
 
@@ -282,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.add_argument("--version", required=True)
     sp.add_argument("--out", default=None)
+    sp.add_argument("--format", choices=["md", "pdf"], default="md", help="md (по умолчанию) или pdf (требует fpdf2, см. requirements.txt)")
     sp.set_defaults(func=cmd_report)
 
     sp = sub.add_parser("status", help="вывести отчёт в консоль без сохранения")
